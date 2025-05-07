@@ -3,6 +3,7 @@ from dataextract import scrape_pagasa_water_level
 from pagasa_scraper import scrape_pagasa_rainfall
 import pandas as pd
 from datetime import datetime
+import os
 
 app = Flask(__name__)
 
@@ -33,4 +34,4 @@ def get_rainfall():
         return jsonify({"status": "error", "message": "Failed to fetch data"}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))

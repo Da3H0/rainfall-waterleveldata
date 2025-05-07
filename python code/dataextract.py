@@ -1,6 +1,5 @@
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -8,60 +7,57 @@ import time
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime
+import os
 
 def scrape_pagasa_water_level():
     """Scrapes the water level data table from PAGASA website"""
     print("Launching browser to fetch PAGASA water level data...")
     
     try:
-        # Configure Chrome options
-        options = webdriver.ChromeOptions()
-        options.add_argument('--headless')  # Run in background
+        # Configure Chrome options (Railway compatible)
+        options = Options()
+        options.add_argument('--headless')
         options.add_argument('--disable-gpu')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+        
+        # Use Railway's Chrome if available, otherwise fall back to local
+        if os.environ.get('RAILWAY_ENVIRONMENT'):
+            options.binary_location = '/usr/bin/google-chrome'
+            driver = webdriver.Chrome(options=options)
+        else:
+            from selenium.webdriver.chrome.service import Service
+            from webdriver_manager.chrome import ChromeDriverManager
+            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
 
-        # Initialize browser
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
         driver.get("https://pasig-marikina-tullahanffws.pagasa.dost.gov.ph/water/map.do")
         
-        # Wait for table to load (adjust time as needed)
+        # Rest of your original code remains exactly the same...
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "table.table-type1"))
         )
-        time.sleep(2)  # Additional buffer time
+        time.sleep(2)
         
-        # Get the page source
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
         
-        # Find the water level data table
         table = soup.find('table', {'class': 'table-type1'})
         if not table:
             print("Error: Could not find water level data table")
             return None
         
-        # Extract headers
         headers = [th.get_text(strip=True) for th in table.find('thead').find_all('th')]
         
-        # Extract table data
         data = []
         for row in table.find('tbody').find_all('tr'):
             cols = row.find_all(['th', 'td'])
-            if len(cols) >= 5:  # Ensure we have all columns
-                station = cols[0].get_text(strip=True)
-                current = cols[1].get_text(strip=True)
-                alert = cols[2].get_text(strip=True)
-                alarm = cols[3].get_text(strip=True)
-                critical = cols[4].get_text(strip=True)
-                
+            if len(cols) >= 5:
                 data.append({
-                    'Station': station,
-                    'Current [EL.m]': current,
-                    'Alert [EL.m]': alert,
-                    'Alarm [EL.m]': alarm,
-                    'Critical [EL.m]': critical,
+                    'Station': cols[0].get_text(strip=True),
+                    'Current [EL.m]': cols[1].get_text(strip=True),
+                    'Alert [EL.m]': cols[2].get_text(strip=True),
+                    'Alarm [EL.m]': cols[3].get_text(strip=True),
+                    'Critical [EL.m]': cols[4].get_text(strip=True),
                     'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M")
                 })
         
