@@ -1,5 +1,5 @@
 flask
 selenium
-webdriver-manager
 beautifulsoup4
 pandas
+pyppeteer

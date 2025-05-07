@@ -1,6 +1,5 @@
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -8,56 +7,53 @@ import time
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime
+import os
 
 def scrape_pagasa_rainfall():
     """Scrapes the rainfall data table from PAGASA website"""
     print("Launching browser to fetch PAGASA rainfall data...")
     
     try:
-        # Configure Chrome options
-        options = webdriver.ChromeOptions()
-        options.add_argument('--headless')  # Run in background
-        options.add_argument('--disable-gpu')
+        # Configure Chrome options for Railway
+        options = Options()
+        options.add_argument('--headless')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
-
+        options.add_argument('--disable-gpu')
+        options.binary_location = os.environ.get("GOOGLE_CHROME_BIN", "/usr/bin/google-chrome")
+        
         # Initialize browser
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+        driver = webdriver.Chrome(
+            executable_path=os.environ.get("CHROMEDRIVER_PATH", "/usr/bin/chromedriver"),
+            options=options
+        )
+        
+        # Rest of your existing code remains the same...
         driver.get("https://pasig-marikina-tullahanffws.pagasa.dost.gov.ph/rainfall/map.do")
         
-        # Wait for table to load (adjust time as needed)
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "table.table-type1"))
         )
-        time.sleep(2)  # Additional buffer time
+        time.sleep(2)
         
-        # Get the page source
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
         
-        # Find the rainfall data table
         table = soup.find('table', {'class': 'table-type1'})
         if not table:
             print("Error: Could not find rainfall data table")
             return None
         
-        # Extract headers
         headers = [th.get_text(strip=True) for th in table.find('thead').find_all('th')]
         
-        # Extract table data
         data = []
         for row in table.find('tbody').find_all('tr'):
             cols = row.find_all(['th', 'td'])
-            if len(cols) >= 3:  # Ensure we have all columns
-                station = cols[0].get_text(strip=True)
-                rf_1hr = cols[1].get_text(strip=True)
-                rf_24hr = cols[2].get_text(strip=True)
-                
+            if len(cols) >= 3:
                 data.append({
-                    'Station': station,
-                    'RF [mm] 1 Hour': rf_1hr,
-                    'RF [mm] Daily Sum(24hr)': rf_24hr,
+                    'Station': cols[0].get_text(strip=True),
+                    'RF [mm] 1 Hour': cols[1].get_text(strip=True),
+                    'RF [mm] Daily Sum(24hr)': cols[2].get_text(strip=True),
                     'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M")
                 })
         
