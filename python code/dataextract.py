@@ -3,62 +3,91 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import WebDriverException
 import time
 from bs4 import BeautifulSoup
 from datetime import datetime
 import os
 import sys
+import logging
+from seleniumwire import webdriver as wire_webdriver
 
-def scrape_pagasa_water_level():
-    """Scrapes the water level data table from PAGASA website"""
-    print("Launching browser to fetch PAGASA water level data...")
-    driver = None
-    
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def init_driver():
+    """Initialize WebDriver with Railway-compatible settings"""
     try:
-        # Configure Chrome options
         options = Options()
         options.add_argument('--headless')
         options.add_argument('--disable-gpu')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
-        options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
+        options.add_argument('--window-size=1920,1080')
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option('useAutomationExtension', False)
+        
+        # Different user agents
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36'
+        ]
+        options.add_argument(f'user-agent={user_agents[1]}')
         
         # Railway-specific configuration
         if os.environ.get('RAILWAY_ENVIRONMENT'):
             options.binary_location = '/usr/bin/google-chrome'
-            options.add_argument('--remote-debugging-port=9222')
-            options.add_argument('--single-process')
-            driver = webdriver.Chrome(options=options)
+            driver = wire_webdriver.Chrome(options=options)
         else:
-            # Local development configuration
             from selenium.webdriver.chrome.service import Service
             from webdriver_manager.chrome import ChromeDriverManager
-            driver = webdriver.Chrome(
+            driver = wire_webdriver.Chrome(
                 service=Service(ChromeDriverManager().install()),
                 options=options
             )
-
-        print("Browser initialized, navigating to PAGASA...")
-        driver.get("https://pasig-marikina-tullahanffws.pagasa.dost.gov.ph/water/map.do")
         
-        print("Waiting for table to load...")
-        WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "table.table-type1"))
-        )
+        return driver
+        
+    except Exception as e:
+        logger.error(f"DRIVER INIT ERROR: {str(e)}")
+        raise
+
+def scrape_pagasa_water_level():
+    """Scrapes the water level data table from PAGASA website"""
+    driver = None
+    try:
+        driver = init_driver()
+        logger.info("Driver initialized successfully")
+        
+        url = "https://pasig-marikina-tullahanffws.pagasa.dost.gov.ph/water/map.do"
+        logger.info(f"Navigating to {url}")
+        
+        driver.get(url)
+        
+        # Wait for either the table or a potential error
+        try:
+            WebDriverWait(driver, 30).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, "table.table-type1"))
+            )
+            logger.info("Table element found")
+        except Exception as e:
+            logger.error(f"Table not found. Page title: {driver.title}")
+            logger.error(f"Current URL: {driver.current_url}")
+            logger.error(f"Page source (first 500 chars): {driver.page_source[:500]}")
+            return None, None
+        
         time.sleep(3)  # Additional buffer time
         
-        print("Extracting page source...")
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
         
-        print("Finding data table...")
         table = soup.find('table', {'class': 'table-type1'})
         if not table:
-            print("Error: Could not find water level data table")
-            print("Page content:", html[:1000])  # Print first 1000 chars of HTML
+            logger.error("Table not found in parsed HTML")
             return None, None
         
-        print("Extracting table data...")
         headers = [th.get_text(strip=True) for th in table.find('thead').find_all('th')]
         
         data = []
@@ -74,13 +103,18 @@ def scrape_pagasa_water_level():
                     'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M")
                 })
         
-        print("Successfully extracted data for", len(data), "stations")
+        logger.info(f"Successfully scraped {len(data)} records")
         return headers, data
-    
+        
+    except WebDriverException as e:
+        logger.error(f"WEBDRIVER ERROR: {str(e)}")
+        if driver:
+            logger.error(f"Browser logs: {driver.get_log('browser')}")
+        return None, None
     except Exception as e:
-        print(f"ERROR in scrape_pagasa_water_level: {str(e)}", file=sys.stderr)
+        logger.error(f"UNEXPECTED ERROR: {str(e)}")
         exc_type, exc_obj, exc_tb = sys.exc_info()
-        print(f"Line number: {exc_tb.tb_lineno}", file=sys.stderr)
+        logger.error(f"Line {exc_tb.tb_lineno}: {str(e)}")
         return None, None
     finally:
         if driver:
