@@ -5,47 +5,60 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import time
 from bs4 import BeautifulSoup
-import pandas as pd
 from datetime import datetime
 import os
+import sys
 
 def scrape_pagasa_water_level():
     """Scrapes the water level data table from PAGASA website"""
     print("Launching browser to fetch PAGASA water level data...")
+    driver = None
     
     try:
-        # Configure Chrome options (Railway compatible)
+        # Configure Chrome options
         options = Options()
         options.add_argument('--headless')
         options.add_argument('--disable-gpu')
         options.add_argument('--no-sandbox')
         options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36')
         
-        # Use Railway's Chrome if available, otherwise fall back to local
+        # Railway-specific configuration
         if os.environ.get('RAILWAY_ENVIRONMENT'):
             options.binary_location = '/usr/bin/google-chrome'
+            options.add_argument('--remote-debugging-port=9222')
+            options.add_argument('--single-process')
             driver = webdriver.Chrome(options=options)
         else:
+            # Local development configuration
             from selenium.webdriver.chrome.service import Service
             from webdriver_manager.chrome import ChromeDriverManager
-            driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+            driver = webdriver.Chrome(
+                service=Service(ChromeDriverManager().install()),
+                options=options
+            )
 
+        print("Browser initialized, navigating to PAGASA...")
         driver.get("https://pasig-marikina-tullahanffws.pagasa.dost.gov.ph/water/map.do")
         
-        # Rest of your original code remains exactly the same...
-        WebDriverWait(driver, 10).until(
+        print("Waiting for table to load...")
+        WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "table.table-type1"))
         )
-        time.sleep(2)
+        time.sleep(3)  # Additional buffer time
         
+        print("Extracting page source...")
         html = driver.page_source
         soup = BeautifulSoup(html, 'html.parser')
         
+        print("Finding data table...")
         table = soup.find('table', {'class': 'table-type1'})
         if not table:
             print("Error: Could not find water level data table")
-            return None
+            print("Page content:", html[:1000])  # Print first 1000 chars of HTML
+            return None, None
         
+        print("Extracting table data...")
         headers = [th.get_text(strip=True) for th in table.find('thead').find_all('th')]
         
         data = []
@@ -61,16 +74,20 @@ def scrape_pagasa_water_level():
                     'Timestamp': datetime.now().strftime("%Y-%m-%d %H:%M")
                 })
         
+        print("Successfully extracted data for", len(data), "stations")
         return headers, data
     
     except Exception as e:
-        print(f"Error during scraping: {str(e)}")
+        print(f"ERROR in scrape_pagasa_water_level: {str(e)}", file=sys.stderr)
+        exc_type, exc_obj, exc_tb = sys.exc_info()
+        print(f"Line number: {exc_tb.tb_lineno}", file=sys.stderr)
         return None, None
     finally:
-        try:
-            driver.quit()
-        except:
-            pass
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
 
 def display_water_level_data(headers, data):
     """Displays the water level data in the exact table format"""
